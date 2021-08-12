@@ -106,6 +106,7 @@ def train(model, train_generator, optimizer, loss_fn, epoch, val_generator=None)
         val_loss, val_acc, _ = test(model, val_generator,
                                     loss_fn=loss_fn, epoch=epoch,
                                     validate=True)
+        print('Val loss: ', val_loss, ' Val acc: ', val_acc)
         return train_loss, train_acc, val_loss, val_acc, model
     return train_loss, train_acc, model
 
@@ -126,7 +127,7 @@ def test(model, generator, loss_fn, epoch=None, validate=False):
 
             pred_y = torch.argmax(ypred, dim=1)
             predy_truey_mass_pT.append(torch.stack(
-                [pred_y.float(), y.float(), mass.float(), pT.float()]).cpu()
+                [pred_y.float().cpu(), y.float().cpu(), mass.float(), pT.float()])
                 )
 
             test_loss += loss.sum().item()
@@ -184,10 +185,6 @@ def main(model, save_dir, model_tag):
         train_acc_ls.append(train_acc)
         val_loss_ls.append(val_loss)
         val_acc_ls.append(val_acc)
-    print("Train loss : ", train_loss_ls)
-    print("Train acc : ", train_acc_ls)
-    print("Val loss : ", val_loss_ls)
-    print("Val acc : ", val_acc_ls)
     writer.close()
 
     print('Loading best model...')
@@ -233,7 +230,7 @@ if __name__ == '__main__':
     # -- some tunable variables -- #
     device = 'cuda'
     lr = 1e-3  # or 1e-4
-    epochs = 500
+    epochs = 1000
     batch_size = 256
     #fold_id = None  # doing 10 bootstraps now
 
@@ -244,79 +241,79 @@ if __name__ == '__main__':
     print("Total of {} samples with {} distinct classes".format(nsamples,
                                                                 nclasses))
 
-    f = open(
-        os.path.join(args.save_dir, "summary_{}.txt".format(args.tag)), "w")
-    f.write("10-fold acc of the FNN trained on 135 N-sub variables.\n")
-    f.write("batch size: {}\n".format(batch_size))
-    f.write("learning rate: {}\n".format(lr))
-    f.write("epochs: {}\n".format(epochs))
-    f.write("Net layers: [135-800-800-800-800-800-64-7]\n")
-    f.write("Dropout: 0.3\n")
-    f.write("Hidden act: ReLU (up until 64-u layer)\n")
-    f.write("Last two layers act: None (why?)\n")
-    f.write("Optimizer: Adam\n")
-    f.write("Loss: CrossEntropyLoss\n")
+    fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
+    with open(fname, "w") as f:
+   
+        f.write("10-fold acc of the FNN trained on 135 N-sub variables.\n")
+        f.write("batch size: {}\n".format(batch_size))
+        f.write("learning rate: {}\n".format(lr))
+        f.write("epochs: {}\n".format(epochs))
+        f.write("Net layers: [135-800-800-800-800-800-64-7]\n")
+        f.write("Dropout: 0.3\n")
+        f.write("Hidden act: ReLU (up until 64-u layer)\n")
+        f.write("Last two layers act: None (why?)\n")
+        f.write("Optimizer: Adam\n")
+        f.write("Loss: CrossEntropyLoss\n")
 
-    f.write("*****************************************\n")
+        f.write("*****************************************\n")
 
 
-    accuracy = []  # avg over all folds
-    class_accuracy = []  # class avg over all folds
-    mass_accuracy = []  # mass-bin avg over all folds
-    pT_accuracy = []  # pT-bin avg over all folds
-    for fold_id in range(10):
-        data_train, data_val, data_test = split_nsub_dataset(nsubs, y, mass, pT,
-                                                             fold_id=fold_id,
-                                                             num_folds=10)
-        generator = load_generator(data_train, data_val,
-                                   data_test, batch_size=batch_size)
+        accuracy = []  # avg over all folds
+        class_accuracy = []  # class avg over all folds
+        mass_accuracy = []  # mass-bin avg over all folds
+        pT_accuracy = []  # pT-bin avg over all folds
+        for fold_id in range(10):
+            data_train, data_val, data_test = split_nsub_dataset(nsubs, y, mass, pT,
+                                                                 fold_id=fold_id,
+                                                                 num_folds=10)
+            generator = load_generator(data_train, data_val,
+                                       data_test, batch_size=batch_size)
 
-        # -- setup the model -- #
-        hlnet_base = make_hlnet_base(input_dim=nsubs.shape[1],
-                                     inter_dim=800,
-                                     num_hidden=5,
-                                     out_dim=64,
-                                     do_rate=0.3)
-        model = HLNet(hlnet_base, out_dim=64, num_labels=nclasses).to(device)
-        model = nn.DataParallel(model)
-        print(model)
-        print("Torch version: ", torch.__version__)
-        def count_parameters(model):
-            return sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print("Total no. of params: ", count_parameters(model))
+            # -- setup the model -- #
+            hlnet_base = make_hlnet_base(input_dim=nsubs.shape[1],
+                                         inter_dim=800,
+                                         num_hidden=5,
+                                         out_dim=64,
+                                         do_rate=0.3)
+            model = HLNet(hlnet_base, out_dim=64, num_labels=nclasses).to(device)
+            model = nn.DataParallel(model)
+            print(model)
+            print("Torch version: ", torch.__version__)
+            def count_parameters(model):
+                return sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print("Total no. of params: ", count_parameters(model))
 
-        model_tag = "{}_{}".format(args.tag, fold_id)
-        acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir, model_tag)
-        accuracy.append(acc)
-        class_accuracy.append(class_acc)
-        mass_accuracy.append(mass_acc)
-        pT_accuracy.append(pT_acc)
+            model_tag = "{}_{}".format(args.tag, fold_id)
+            acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir, model_tag)
+            accuracy.append(acc)
+            class_accuracy.append(class_acc)
+            mass_accuracy.append(mass_acc)
+            pT_accuracy.append(pT_acc)
 
-        f.write("Fold {}\n".format(fold_id))
-        f.write("Accuracy : \n")
-        f.write(str(acc)+"\n")
-        f.write("Class-bin accuracy : \n")
-        f.write(str(class_acc)+"\n")
-        f.write("Mass-bin accuracy : \n")
-        f.write(str(mass_acc)+"\n")
-        f.write("pT-bin accuracy : \n")
-        f.write(str(pT_acc)+"\n")
+            f.write("Fold {}\n".format(fold_id))
+            f.write("Accuracy : \n")
+            f.write(str(acc)+"\n")
+            f.write("Class-bin accuracy : \n")
+            f.write(str(class_acc)+"\n")
+            f.write("Mass-bin accuracy : \n")
+            f.write(str(mass_acc)+"\n")
+            f.write("pT-bin accuracy : \n")
+            f.write(str(pT_acc)+"\n")
 
-    mean_accuracy = np.mean(accuracy)
-    mean_class_accuracy = np.mean(class_accuracy, axis=0)
-    mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
-    mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
+        mean_accuracy = np.mean(accuracy)
+        mean_class_accuracy = np.mean(class_accuracy, axis=0)
+        mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
+        mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
 
-    f.write("*****************************************\n")
-    f.write("Avg accuracy: \n")
-    f.write(str(mean_accuracy)+"\n")
-    f.write("Avg class-bin accuracy: \n")
-    f.write(str(mean_class_accuracy)+"\n")
-    f.write("Avg mass-bin accuracy: \n")
-    f.write(str(mean_massbin_accuracy)+"\n")
-    f.write("Avg pT-bin accuracy: \n")
-    f.write(str(mean_pTbin_accuracy)+"\n")
-    f.write("*****************************************\n")
-    f.close()
+        f.write("*****************************************\n")
+        f.write("Avg accuracy: \n")
+        f.write(str(mean_accuracy)+"\n")
+        f.write("Avg class-bin accuracy: \n")
+        f.write(str(mean_class_accuracy)+"\n")
+        f.write("Avg mass-bin accuracy: \n")
+        f.write(str(mean_massbin_accuracy)+"\n")
+        f.write("Avg pT-bin accuracy: \n")
+        f.write(str(mean_pTbin_accuracy)+"\n")
+        f.write("*****************************************\n")
 
     print("Done :)")
