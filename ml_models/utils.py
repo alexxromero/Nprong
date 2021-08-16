@@ -7,6 +7,22 @@ import h5py
 from torch.utils.data import Dataset
 import torch
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler, MaxAbsScaler
+
+
+def get_nsub_mass_dataset(input_file):
+    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
+    with h5py.File(mass_pT_file, 'r') as f:
+        y = np.array(f['target'])
+        mass = np.array(f['jet_Mass'])
+        pT = np.array(f['jet_PT'])
+    with h5py.File(input_file, 'r') as f:
+        nsubs_mass = np.concatenate((f['Nsubs']['Nsubs_beta05'],
+                                     f['Nsubs']['Nsubs_beta10'],
+                                     f['Nsubs']['Nsubs_beta20'],
+                                     mass.reshape(-1, 1)), axis=-1)
+    return y, nsubs_mass, mass, pT
+
 
 def get_nsub_dataset(input_file):
     with h5py.File(input_file, 'r') as f:
@@ -14,6 +30,10 @@ def get_nsub_dataset(input_file):
         nsubs = np.concatenate((f['Nsubs']['Nsubs_beta05'],
                                 f['Nsubs']['Nsubs_beta10'],
                                 f['Nsubs']['Nsubs_beta20']), axis=-1)
+        #mass = np.array(f['jet_Mass'])
+        #pT = np.array(f['jet_PT'])
+    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
+    with h5py.File(mass_pT_file, 'r') as f:
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
     return y, nsubs, mass, pT
@@ -88,6 +108,12 @@ def split_nsub_dataset(nsubs, y, mass, pT, fold_id=None, num_folds=10):
         mass[:train_cut], mass[train_cut:val_cut], mass[val_cut:]
     pT_train, pT_val, pT_test = \
         pT[:train_cut], pT[train_cut:val_cut], pT[val_cut:]
+
+    scaler = StandardScaler()
+    #scaler = MaxAbsScaler()
+    nsubs_train = scaler.fit_transform(nsubs_train)
+    nsubs_val = scaler.transform(nsubs_val)
+    nsubs_test = scaler.transform(nsubs_test)
 
     data_train = NsubsDataset(nsubs_train, y_train, mass_train, pT_train)
     data_val = NsubsDataset(nsubs_val, y_val, mass_val, pT_val)

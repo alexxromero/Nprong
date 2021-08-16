@@ -250,8 +250,7 @@ if __name__ == '__main__':
         f.write("epochs: {}\n".format(epochs))
         f.write("Net layers: [135-800-800-800-800-800-64-7]\n")
         f.write("Dropout: 0.3\n")
-        f.write("Hidden act: ReLU (up until 64-u layer)\n")
-        f.write("Last two layers act: None (why?)\n")
+        f.write("Hidden act: ReLU\n")
         f.write("Optimizer: Adam\n")
         f.write("Loss: CrossEntropyLoss\n")
 
