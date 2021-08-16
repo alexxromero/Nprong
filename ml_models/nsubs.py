@@ -229,21 +229,13 @@ if __name__ == '__main__':
 
     # -- some tunable variables -- #
     device = 'cuda'
-    lr = 1e-3  # or 1e-4
+    lr = 1e-4  # or 1e-4
     epochs = 1000
     batch_size = 256
     #fold_id = None  # doing 10 bootstraps now
 
-    # -- read and split the data -- #
-    y, nsubs, mass, pT = get_nsub_dataset(args.input_file)
-    nsamples = y.shape[0]
-    nclasses = len(np.unique(y))
-    print("Total of {} samples with {} distinct classes".format(nsamples,
-                                                                nclasses))
-
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
     with open(fname, "w") as f:
-   
         f.write("10-fold acc of the FNN trained on 135 N-sub variables.\n")
         f.write("batch size: {}\n".format(batch_size))
         f.write("learning rate: {}\n".format(lr))
@@ -262,9 +254,18 @@ if __name__ == '__main__':
         mass_accuracy = []  # mass-bin avg over all folds
         pT_accuracy = []  # pT-bin avg over all folds
         for fold_id in range(10):
-            data_train, data_val, data_test = split_nsub_dataset(nsubs, y, mass, pT,
-                                                                 fold_id=fold_id,
-                                                                 num_folds=10)
+            print("*******************************************")
+            print("* Nsubs Fold #: {}                         *".format(fold_id))
+            print("*******************************************")
+            # -- read and split the data -- #
+            y, nsubs, mass, pT = get_nsub_dataset(args.input_file)
+            nsamples = y.shape[0]
+            nclasses = len(np.unique(y))
+            print("Total of {} samples with {} classes".format(nsamples, nclasses))
+
+            data_train, data_val, data_test = split_dataset(nsubs, y, mass, pT,
+                                                            fold_id=fold_id,
+                                                            num_folds=10)
             generator = load_generator(data_train, data_val,
                                        data_test, batch_size=batch_size)
 
@@ -280,10 +281,12 @@ if __name__ == '__main__':
             print("Torch version: ", torch.__version__)
             def count_parameters(model):
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
+            f.write("Num. of trainable params: {} \n".format(count_parameters(model)))
             print("Total no. of params: ", count_parameters(model))
 
             model_tag = "{}_{}".format(args.tag, fold_id)
-            acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir, model_tag)
+            acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir,
+                                                    model_tag)
             accuracy.append(acc)
             class_accuracy.append(class_acc)
             mass_accuracy.append(mass_acc)

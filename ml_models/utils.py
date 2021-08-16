@@ -13,10 +13,10 @@ from sklearn.preprocessing import StandardScaler, MaxAbsScaler
 def get_nsub_mass_dataset(input_file):
     mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
     with h5py.File(mass_pT_file, 'r') as f:
-        y = np.array(f['target'])
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
     with h5py.File(input_file, 'r') as f:
+        y = np.array(f['target'])
         nsubs_mass = np.concatenate((f['Nsubs']['Nsubs_beta05'],
                                      f['Nsubs']['Nsubs_beta10'],
                                      f['Nsubs']['Nsubs_beta20'],
@@ -25,6 +25,10 @@ def get_nsub_mass_dataset(input_file):
 
 
 def get_nsub_dataset(input_file):
+    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
+    with h5py.File(mass_pT_file, 'r') as f:
+        mass = np.array(f['jet_Mass'])
+        pT = np.array(f['jet_PT'])
     with h5py.File(input_file, 'r') as f:
         y = np.array(f['target'])
         nsubs = np.concatenate((f['Nsubs']['Nsubs_beta05'],
@@ -32,12 +36,17 @@ def get_nsub_dataset(input_file):
                                 f['Nsubs']['Nsubs_beta20']), axis=-1)
         #mass = np.array(f['jet_Mass'])
         #pT = np.array(f['jet_PT'])
-    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
+    return y, nsubs, mass, pT
+
+def get_threeM_dataset(input_file):
+    mass_pT_file = "/Users/alex/Desktop/Nprong/ml_models/dataset/dataset_noPtNorm.h5"
     with h5py.File(mass_pT_file, 'r') as f:
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
-    return y, nsubs, mass, pT
-
+    with h5py.File(input_file, 'r') as f:
+        y = np.array(f['target'])
+        threeM = np.array(f['Constituents']['threeM'])
+    return y, threeM, mass, pT
 
 def get_acc_per_class(ypred, y):
     class_accs = []
@@ -74,34 +83,34 @@ def get_acc_per_pTbin(ypred, y, pT):
     return pTbin_accs
 
 
-class NsubsDataset(Dataset):
-    def __init__(self, nsubs, y, mass, pT):
-        self.nsubs, self.y, self.mass, self.pT = nsubs, y, mass, pT
+class Dataset(Dataset):
+    def __init__(self, X, y, mass, pT):
+        self.X, self.y, self.mass, self.pT = X, y, mass, pT
         self.n = nsubs.shape[0]
 
     def __len__(self):
-        return len(self.nsubs)
+        return len(self.X)
 
     def __getitem__(self, index):
-        return self.nsubs[index], self.y[index], self.mass[index], self.pT[index]
+        return self.X[index], self.y[index], self.mass[index], self.pT[index]
 
 
-def split_nsub_dataset(nsubs, y, mass, pT, fold_id=None, num_folds=10):
-    total_num_sample = nsubs.shape[0]
+def split_dataset(X, y, mass, pT, fold_id=None, num_folds=10, scale=False):
+    total_num_sample = X.shape[0]
     if fold_id is not None:
-        l = [nsubs, y, mass, pT]
+        l = [X, y, mass, pT]
         # Rearrange the samples. The test samples are placed at the end.
         for i in range(len(l)):
             l[i] = cross_validate_perm(l[i], fold_id=fold_id,
                                        num_folds=num_folds)
-        nsubs, y, mass, pT = l
+        X, y, mass, pT = l
 
     # for 10-folds, the split train:test:val is 80:10:10
     train_cut = int(total_num_sample * 0.8)
     val_cut = int(total_num_sample * 0.9)
 
-    nsubs_train, nsubs_val, nsubs_test = \
-        nsubs[:train_cut], nsubs[train_cut:val_cut], nsubs[val_cut:]
+    X_train, X_val, X_test = \
+        X[:train_cut], X[train_cut:val_cut], X[val_cut:]
     y_train, y_val, y_test = \
         y[:train_cut], y[train_cut:val_cut], y[val_cut:]
     mass_train, mass_val, mass_test = \
@@ -109,15 +118,16 @@ def split_nsub_dataset(nsubs, y, mass, pT, fold_id=None, num_folds=10):
     pT_train, pT_val, pT_test = \
         pT[:train_cut], pT[train_cut:val_cut], pT[val_cut:]
 
-    scaler = StandardScaler()
-    #scaler = MaxAbsScaler()
-    nsubs_train = scaler.fit_transform(nsubs_train)
-    nsubs_val = scaler.transform(nsubs_val)
-    nsubs_test = scaler.transform(nsubs_test)
+    if scale:
+        scaler = StandardScaler()
+        #scaler = MaxAbsScaler()
+        nsubs_train = scaler.fit_transform(X_train)
+        nsubs_val = scaler.transform(X_val)
+        nsubs_test = scaler.transform(X_test)
 
-    data_train = NsubsDataset(nsubs_train, y_train, mass_train, pT_train)
-    data_val = NsubsDataset(nsubs_val, y_val, mass_val, pT_val)
-    data_test = NsubsDataset(nsubs_test, y_test, mass_test, pT_test)
+    data_train = Dataset(X_train, y_train, mass_train, pT_train)
+    data_val = Dataset(X_val, y_val, mass_val, pT_val)
+    data_test = Dataset(X_test, y_test, mass_test, pT_test)
 
     return data_train, data_val, data_test
 
