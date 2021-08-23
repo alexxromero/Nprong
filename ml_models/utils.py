@@ -39,7 +39,7 @@ def get_nsub_dataset(input_file):
     return y, nsubs, mass, pT
 
 def get_threeM_dataset(input_file):
-    mass_pT_file = "/Users/alex/Desktop/Nprong/ml_models/dataset/dataset_noPtNorm.h5"
+    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
     with h5py.File(mass_pT_file, 'r') as f:
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
@@ -86,7 +86,7 @@ def get_acc_per_pTbin(ypred, y, pT):
 class Dataset(Dataset):
     def __init__(self, X, y, mass, pT):
         self.X, self.y, self.mass, self.pT = X, y, mass, pT
-        self.n = nsubs.shape[0]
+        self.n = X.shape[0]
 
     def __len__(self):
         return len(self.X)
@@ -135,15 +135,23 @@ def split_dataset(X, y, mass, pT, fold_id=None, num_folds=10, scale=False):
 def plot_loss_acc(train_loss, train_acc, val_loss, val_acc,
                   save_dir, model_tag):
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-
+    ix = np.argmax(val_acc)
     ax[0].plot(train_acc, label='Train')
     ax[0].plot(val_acc, label='Val')
+    ax[0].vlines(ix, 
+                 np.min([np.min(train_acc), np.min(val_acc)]), 
+                 np.max([np.max(train_acc), np.max(val_acc)]),
+                 colors='black', linestyles='dotted')
     ax[0].set_xlabel('epoch', fontsize=14)
     ax[0].set_ylabel('Accuracy', fontsize=14)
     ax[0].legend(fontsize=14)
 
     ax[1].plot(train_loss, label='Train')
     ax[1].plot(val_loss, label='Val')
+    ax[1].vlines(ix,
+                 np.min([np.min(train_loss), np.min(val_loss)]),
+                 np.max([np.max(train_loss), np.max(val_loss)]),
+                 colors='black', linestyles='dotted')
     ax[1].set_xlabel('epoch', fontsize=14)
     ax[1].set_ylabel('Loss', fontsize=14)
     ax[1].legend(fontsize=14)

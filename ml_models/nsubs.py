@@ -7,7 +7,7 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import get_nsub_dataset, split_nsub_dataset
+from utils import get_nsub_dataset, split_dataset
 from utils import plot_loss_acc
 from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
 
@@ -230,7 +230,7 @@ if __name__ == '__main__':
     # -- some tunable variables -- #
     device = 'cuda'
     lr = 1e-4  # or 1e-4
-    epochs = 1000
+    epochs = 500
     batch_size = 256
     #fold_id = None  # doing 10 bootstraps now
 

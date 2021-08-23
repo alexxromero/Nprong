@@ -13,7 +13,7 @@ from energyflow.archs import PFN
 
 import tensorflow as tf
 from tensorflow import keras
-from tf.keras import backend as K
+from tensorflow.keras import backend as K
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = torch.cuda.get_device_name(0)
 # print('training using GPU:', torch.cuda.get_device_name(0))
@@ -24,7 +24,7 @@ def setup_PFN(input_dim, lr):
                 output_dim=nclasses,
                 Phi_sizes=(128, 128),
                 Phi_acts = 'relu',
-                F_sizes=(1024, 2014),
+                F_sizes=(1024, 1024),
                 F_acts = 'relu',
                 F_dropouts=0.2,
                 compile_opts={'optimizer': opt,
@@ -46,6 +46,7 @@ def train_model(model, save_dir, model_tag, data_train, data_val):
                         batch_size=batch_size,
                         validation_data=(data_val[:n_val][0],
                                          data_val[:n_val][1]),
+                        verbose=2,
                         callbacks=callbacks)
     plot_loss_acc(history.history['loss'],
                   history.history['acc'],
@@ -63,7 +64,7 @@ def eval_model(save_dir, model_tag, data_test):
     ypred = np.argmax(ypred, axis=1)
     ytrue = np.argmax(data_test[:n_test][1], axis=1)
 
-    acc = (torch.argmax(ypred, dim=1) == ytrue).sum().item() / ytrue.shape[0]
+    acc = (ypred == ytrue).sum().item() / ytrue.shape[0]
     print("Acc: ", acc)
 
     class_acc = get_acc_per_class(ypred, ytrue)
@@ -95,23 +96,20 @@ if __name__ == '__main__':
 
     # -- some tunable variables -- #
     device = 'cuda'
-    lr = 1e-4  # or 1e-4
-    epochs = 1000
+    lr = 1e-4  # or 1e-3
+    epochs = 500
     batch_size = 256
     #fold_id = None  # doing 10 bootstraps now
 
-    fname = open(
-        os.path.join(args.save_dir, "summary_{}.txt".format(args.tag)), "w")
+    fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
     with open(fname, "w") as f:
-        f.write("10-fold acc of the PFN.\n")
+        f.write("5-fold acc of the PFN.\n")
         f.write("batch size: {}\n".format(batch_size))
         f.write("learning rate: {}\n".format(lr))
         f.write("epochs: {}\n".format(epochs))
         f.write("Phi layers: [128 128]\n")
         f.write("F layers: [1024 1024]\n")
-        f.write("F_dropouts: 0.2\n")
-        f.write("Hidden act: ReLU (up until 64-u layer)\n")
-        f.write("Last two layers act: None (why?)\n")
+        f.write("F_dropouts: 0.5\n")
         f.write("Optimizer: Adam\n")
         f.write("Output act: Softmax")
         f.write("Hiden act: ReLu")
