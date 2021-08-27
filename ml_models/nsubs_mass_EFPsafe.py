@@ -7,7 +7,7 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import get_nsub_mass_multi_dataset, split_dataset
+from utils import get_nsub_EFP_mass_multi_dataset, split_dataset
 from utils import plot_loss_acc
 from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
 
@@ -236,7 +236,7 @@ if __name__ == '__main__':
 
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
     with open(fname, "w") as f:
-        f.write("10-fold acc of the FNN trained on 135 N-sub variables, plus jet mass and multiplicity.\n")
+        f.write("10-fold acc of the FNN trained on 135 N-sub variables plus IRC-safe EFPs (and mass+multi).\n")
         f.write("batch size: {}\n".format(batch_size))
         f.write("learning rate: {}\n".format(lr))
         f.write("epochs: {}\n".format(epochs))
@@ -248,6 +248,7 @@ if __name__ == '__main__':
 
         f.write("*****************************************\n")
 
+
         accuracy = []  # avg over all folds
         class_accuracy = []  # class avg over all folds
         mass_accuracy = []  # mass-bin avg over all folds
@@ -257,13 +258,11 @@ if __name__ == '__main__':
             print("* Nsubs Fold #: {}                         *".format(fold_id))
             print("*******************************************")
             # -- read and split the data -- #
-            y, X, mass, pT = get_nsub_mass_multi_dataset(args.input_file)
+            y, X, mass, pT = get_nsub_EFP_mass_multi_dataset(args.input_file)
+            print("No. features: ", X.shape[1])
             nsamples = y.shape[0]
             nclasses = len(np.unique(y))
             print("Total of {} samples with {} classes".format(nsamples, nclasses))
-
-            #X[:, -2] /= 700.0  # normalize mass
-            #X[:, -1] /= 230    # normalize multiplicity
 
             data_train, data_val, data_test = split_dataset(X, y, mass, pT,
                                                             fold_id=fold_id,

@@ -97,13 +97,13 @@ if __name__ == '__main__':
     # -- some tunable variables -- #
     device = 'cuda'
     lr = 1e-4  # or 1e-3
-    epochs = 500
+    epochs = 1000
     batch_size = 256
     #fold_id = None  # doing 10 bootstraps now
 
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
     with open(fname, "w") as f:
-        f.write("5-fold acc of the PFN.\n")
+        f.write("10-fold acc of the PFN.\n")
         f.write("batch size: {}\n".format(batch_size))
         f.write("learning rate: {}\n".format(lr))
         f.write("epochs: {}\n".format(epochs))
@@ -167,19 +167,29 @@ if __name__ == '__main__':
             f.write(str(pT_acc)+"\n")
 
         mean_accuracy = np.mean(accuracy)
+        std_accuracy =  np.std(accuracy, ddof=1)
         mean_class_accuracy = np.mean(class_accuracy, axis=0)
+        std_class_accuracy = np.std(class_accuracy, ddof=1, axis=0)
         mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
+        std_massbin_accuracy = np.std(mass_accuracy, ddof=1, axis=0)
         mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
+        std_pTbin_accuracy = np.std(pT_accuracy, ddof=1, axis=0)
 
         f.write("*****************************************\n")
         f.write("Avg accuracy: \n")
-        f.write(str(mean_accuracy)+"\n")
+        f.write(str(mean_accuracy) + " + " + str(std_accuracy) + "\n")
         f.write("Avg class-bin accuracy: \n")
-        f.write(str(mean_class_accuracy)+"\n")
+        class_labels = ["N=1 ", "N=2 ", "N=3 ", "N=4b", "N=8", "N=4q", "N=6"]
+        for st in zip(class_labels, mean_class_accuracy, std_class_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        mass_labels = ["[{}, {}]".format(300+i*50, 300+(i+1)*50) for i in range(8)]
         f.write("Avg mass-bin accuracy: \n")
-        f.write(str(mean_massbin_accuracy)+"\n")
+        for st in zip(mass_labels, mean_massbin_accuracy, std_massbin_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        pT_labels = ["[{}, {}]".format(1000+i*20, 1000+(i+1)*20) for i in range(11)]
         f.write("Avg pT-bin accuracy: \n")
-        f.write(str(mean_pTbin_accuracy)+"\n")
+        for st in zip(pT_labels, mean_pTbin_accuracy, std_pTbin_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
         f.write("*****************************************\n")
 
     print("Done :)")
