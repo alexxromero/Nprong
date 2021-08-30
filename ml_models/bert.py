@@ -1,11 +1,10 @@
 import torch
-from transformers import *
-from transformers import modeling_bert
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, MSELoss
 from transformers import *
-from transformers.modeling_bert import BertEncoder, BertPooler
+from transformers import BertConfig
+from transformers.models.bert.modeling_bert import BertEncoder, BertPooler
 import numpy as np
 
 class BertModel(BertPreTrainedModel):

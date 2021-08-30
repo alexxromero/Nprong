@@ -7,7 +7,7 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import get_nsub_dataset, split_dataset
+from utils import get_threeM_dataset, split_dataset
 from utils import plot_loss_acc
 from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
 
@@ -18,35 +18,48 @@ from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 #from utils import get_batch_classwise_acc
 
+import transformers 
+from transformers import BertModel, BertConfig
 from bert import BertForSequenceClassification
 
 os.environ['CUDA_VISIBLE_DEVICES'] = torch.cuda.get_device_name(0)
 print('training using GPU:', torch.cuda.get_device_name(0))
 
-config = BertConfig(hidden_size=args.hidden_size,
-                    num_hidden_layers=args.num_hidden,
-                    num_attention_heads=args.num_attention_heads,
-                    intermediate_size=args.inter_dim,
+def load_generator(data_train, data_val, data_test, batch_size=256):
+    generator = {}
+    generator['train'] = torch.utils.data.DataLoader(
+        data_train, batch_size=batch_size, shuffle=True, num_workers=8)
+    generator['val'] = torch.utils.data.DataLoader(
+        data_val, batch_size=batch_size, shuffle=True, num_workers=8)
+    generator['test'] = torch.utils.data.DataLoader(
+        data_test, batch_size=batch_size, shuffle=True, num_workers=8)
+    return generator
+
+config = BertConfig(hidden_size=256,
+                    num_hidden_layers=4,
+                    num_attention_heads=8,
+                    intermediate_size=128,
                     num_labels=7,
                     input_dim=230,
                     attention_probs_dropout_prob=0.1,
                     hidden_dropout_prob=0.1)
 
-def train(model, optimizer, epoch):
+def train(model, train_generator, optimizer, loss_fn, epoch, val_generator=None):
     model.train()
     train_loss, train_acc = 0.0, 0.0
     iterations = len(train_generator)
     for i, (nsubs, y, mass, pT) in enumerate(train_generator):
         optimizer.zero_grad()
-        X = torch.tensor(X).float().to(device)
+
+        nsubs = torch.tensor(nsubs).float().to(device)
         y = torch.tensor(y).long().to(device)
 
-        ypred = model(X)
+        ypred = model(nsubs)
         loss = loss_fn(ypred, y)
         loss = loss.mean()
         loss.backward()
         optimizer.step()
-        acc = (torch.argmax(pred, dim=1) == y).sum().item() / y.shape[0]
+        acc = (torch.argmax(ypred, dim=1) == y).sum().item() / y.shape[0]
 
         train_loss += loss.item()
         train_acc += acc
@@ -76,7 +89,7 @@ def test(model, generator, loss_fn, epoch=None, validate=False):
 
     with torch.no_grad():
         for i, (nsubs, y, mass, pT) in enumerate(generator):
-            X = torch.tensor(X).float().to(device),
+            nsubs = torch.tensor(nsubs).float().to(device)
             y = torch.tensor(y).long().to(device)
 
             ypred = model(nsubs)
@@ -103,16 +116,6 @@ def test(model, generator, loss_fn, epoch=None, validate=False):
 
 
 def main(model, save_dir, model_tag):
-    hl_param = []
-    other_param = []
-    for name, param in model.named_parameters():
-        if 'hlnet_base' in name:
-            hl_param.append(param)
-        else:
-            other_param.append(param)
-
-    param_groups = [{'params': hl_param, 'lr': lr},
-                    {'params': other_param, 'lr': lr}]
 
     optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200, 400, 600, 800], gamma=0.5, last_epoch=-1)
@@ -181,6 +184,7 @@ if __name__ == '__main__':
     # -- output dit -- #
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
+    writer = SummaryWriter(args.save_dir)
 
     # -- some tunable variables -- #
     device = 'cuda'
@@ -191,16 +195,12 @@ if __name__ == '__main__':
 
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
     with open(fname, "w") as f:
-        f.write("10-fold acc of the PFN.\n")
+        f.write("10-fold acc of the Transformer.\n")
         f.write("batch size: {}\n".format(batch_size))
         f.write("learning rate: {}\n".format(lr))
         f.write("epochs: {}\n".format(epochs))
-        f.write("Phi layers: [128 128]\n")
-        f.write("F layers: [1024 1024]\n")
-        f.write("F_dropouts: 0.5\n")
         f.write("Optimizer: Adam\n")
         f.write("Output act: Softmax")
-        f.write("Hiden act: ReLu")
         f.write("Loss: CrossEntropyLoss\n")
 
         f.write("*****************************************\n")
@@ -217,7 +217,6 @@ if __name__ == '__main__':
             y, threeM, mass, pT = get_threeM_dataset(args.input_file)
             nsamples = y.shape[0]
             nclasses = len(np.unique(y))
-            y = tf.keras.utils.to_categorical(y, num_classes=nclasses)
             print("Total of {} samples with {} classes".format(nsamples, nclasses))
 
             data_train, data_val, data_test = split_dataset(threeM, y, mass, pT,
