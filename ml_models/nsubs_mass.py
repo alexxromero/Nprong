@@ -7,7 +7,7 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import get_nsub_mass_multi_dataset, split_dataset
+from utils import get_nsub_mass_dataset, split_dataset
 from utils import plot_loss_acc
 from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
 
@@ -257,7 +257,7 @@ if __name__ == '__main__':
             print("* Nsubs Fold #: {}                         *".format(fold_id))
             print("*******************************************")
             # -- read and split the data -- #
-            y, X, mass, pT = get_nsub_mass_multi_dataset(args.input_file)
+            y, X, mass, pT = get_nsub_mass_dataset(args.input_file)
             nsamples = y.shape[0]
             nclasses = len(np.unique(y))
             print("Total of {} samples with {} classes".format(nsamples, nclasses))

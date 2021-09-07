@@ -40,23 +40,18 @@ def get_nsub_EFP_mass_multi_dataset(input_file):
     return y, nsubs_EFP_mass, mass, pT
 
 
-def get_nsub_mass_multi_dataset(input_file):
+def get_nsub_mass_dataset(input_file):
     mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
     with h5py.File(mass_pT_file, 'r') as f:
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
-    EFP_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_EFPs.h5"
-    with h5py.File(EFP_file, 'r') as f:
-        multi = f['kappa00_beta10'][()][:, 0]
     with h5py.File(input_file, 'r') as f:
         y = np.array(f['target'])
         mass_normed = mass / 700.0
-        multi_normed = multi / 230
         nsubs_mass = np.concatenate((f['Nsubs']['Nsubs_beta05'],
                                      f['Nsubs']['Nsubs_beta10'],
                                      f['Nsubs']['Nsubs_beta20'],
-                                     mass_normed.reshape(-1, 1),
-                                     multi_normed.reshape(-1, 1)), axis=-1)
+                                     mass_normed.reshape(-1, 1)), axis=-1)
     return y, nsubs_mass, mass, pT
 
 

@@ -36,7 +36,7 @@ class GatedHLNet(nn.Module):
         super(GatedHLNet, self).__init__()
         self.gates = nn.Parameter(data=torch.randn(299))
         self.hlnet_base = hlnet_base
-        self.top = nn.Linear(128, num_labels)
+        self.top = nn.Linear(64, num_labels)
         self.bn = nn.BatchNorm1d(64)
 
     def path(self, X, gates):
@@ -104,6 +104,7 @@ def train(model, train_generator, optimizer, loss_fn, epoch, val_generator=None)
     model.train()
     train_loss, train_acc = 0.0, 0.0
     iterations = len(train_generator)
+    strength = 10
     for i, (X, y, mass, pT) in enumerate(train_generator):
         optimizer.zero_grad()
 
@@ -149,10 +150,10 @@ def test(model, generator, loss_fn, epoch=None, validate=False):
             X = torch.tensor(X).float().to(device)
             y = torch.tensor(y).long().to(device)
 
-            ypred, ypred_clipped = model(X)
+            ypred, ypred_clipped, _ = model(X)
             loss = loss_fn(ypred, y)
 
-            pred_y_clipped = torch.argmax(pred_clipped, dim=1)
+            pred_y_clipped = torch.argmax(ypred_clipped, dim=1)
             pred_y = torch.argmax(ypred, dim=1)
             predy_truey_mass_pT.append(torch.stack(
                 [pred_y.float().cpu(), pred_y_clipped.float().cpu(), y.float().cpu(), mass.float(), pT.float()])
@@ -238,13 +239,15 @@ def main(model, save_dir, model_tag):
     gates_ascend = np.argsort(gates_selected_v)[::-1]
     num_remaining_feat = len(gates_selected_i)
     print('gates > 0.01, ascending order: ')
-    print(gates_selected_i[gates_ascend])
+    gates_asc = gates_selected_i[gates_ascend]
+    print(gates_asc)
     # ----------------------------------------------------------- #
 
     predy = predy_truey_mass_pT[0, :]
-    truey = predy_truey_mass_pT[1, :]
-    mass = predy_truey_mass_pT[2, :]
-    pT = predy_truey_mass_pT[3, :]
+    predy_clipped = predy_truey_mass_pT[1, :]
+    truey = predy_truey_mass_pT[2, :]
+    mass = predy_truey_mass_pT[3, :]
+    pT = predy_truey_mass_pT[4, :]
 
     class_acc = get_acc_per_class(predy, truey)
     print("Class Acc: ", class_acc)
@@ -258,7 +261,7 @@ def main(model, save_dir, model_tag):
     plot_loss_acc(train_loss_ls, train_acc_ls, val_loss_ls, val_acc_ls,
                   save_dir, model_tag)
 
-    return test_acc, class_acc, mass_acc, pT_acc
+    return test_acc, class_acc, mass_acc, pT_acc, gates_asc
 
 
 if __name__ == '__main__':
@@ -279,6 +282,7 @@ if __name__ == '__main__':
     lr = 1e-4  # or 1e-4
     epochs = 1000
     batch_size = 256
+    nfolds = 3
     #fold_id = None  # doing 10 bootstraps now
 
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
@@ -292,6 +296,7 @@ if __name__ == '__main__':
         f.write("Dropout: 0.3\n")
         f.write("Hidden act: ReLU\n")
         f.write("Optimizer: Adam\n")
+        f.write("Strength: 10\n")
         f.write("Loss: CrossEntropyLoss\n")
 
         f.write("*****************************************\n")
@@ -300,7 +305,11 @@ if __name__ == '__main__':
         class_accuracy = []  # class avg over all folds
         mass_accuracy = []  # mass-bin avg over all folds
         pT_accuracy = []  # pT-bin avg over all folds
-        for fold_id in range(10):
+        gates_ascending = []  # gates in ascending order
+        
+        # Not doing any k-folds 
+        for fold_id in [None]:
+        #for fold_id in range(nfolds):
             print("*******************************************")
             print("* Nsubs Fold #: {}                         *".format(fold_id))
             print("*******************************************")
@@ -333,12 +342,13 @@ if __name__ == '__main__':
             print("Total no. of params: ", count_parameters(model))
 
             model_tag = "{}_{}".format(args.tag, fold_id)
-            acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir,
-                                                    model_tag)
+            acc, class_acc, mass_acc, pT_acc, gates_asc = main(model, args.save_dir,
+                                                               model_tag)
             accuracy.append(acc)
             class_accuracy.append(class_acc)
             mass_accuracy.append(mass_acc)
             pT_accuracy.append(pT_acc)
+            gates_ascending.append(gates_asc)
 
             f.write("Fold {}\n".format(fold_id))
             f.write("Accuracy : \n")
@@ -349,31 +359,34 @@ if __name__ == '__main__':
             f.write(str(mass_acc)+"\n")
             f.write("pT-bin accuracy : \n")
             f.write(str(pT_acc)+"\n")
+            f.write("Gates - asc order : \n")
+            f.write(str(gates_asc)+"\n")
 
-        mean_accuracy = np.mean(accuracy)
-        std_accuracy =  np.std(accuracy, ddof=1)
-        mean_class_accuracy = np.mean(class_accuracy, axis=0)
-        std_class_accuracy = np.std(class_accuracy, ddof=1, axis=0)
-        mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
-        std_massbin_accuracy = np.std(mass_accuracy, ddof=1, axis=0)
-        mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
-        std_pTbin_accuracy = np.std(pT_accuracy, ddof=1, axis=0)
+        #if nfolds > 1: 
+        #    mean_accuracy = np.mean(accuracy)
+        #    std_accuracy =  np.std(accuracy, ddof=1)
+        #    mean_class_accuracy = np.mean(class_accuracy, axis=0)
+        #    std_class_accuracy = np.std(class_accuracy, ddof=1, axis=0)
+        #    mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
+        #    std_massbin_accuracy = np.std(mass_accuracy, ddof=1, axis=0)
+        #    mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
+        #    std_pTbin_accuracy = np.std(pT_accuracy, ddof=1, axis=0)
 
-        f.write("*****************************************\n")
-        f.write("Avg accuracy: \n")
-        f.write(str(mean_accuracy) + " + " + str(std_accuracy) + "\n")
-        f.write("Avg class-bin accuracy: \n")
-        class_labels = ["N=1 ", "N=2 ", "N=3 ", "N=4b", "N=8", "N=4q", "N=6"]
-        for st in zip(class_labels, mean_class_accuracy, std_class_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        mass_labels = ["[{}, {}]".format(300+i*50, 300+(i+1)*50) for i in range(8)]
-        f.write("Avg mass-bin accuracy: \n")
-        for st in zip(mass_labels, mean_massbin_accuracy, std_massbin_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        pT_labels = ["[{}, {}]".format(1000+i*20, 1000+(i+1)*20) for i in range(11)]
-        f.write("Avg pT-bin accuracy: \n")
-        for st in zip(pT_labels, mean_pTbin_accuracy, std_pTbin_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        f.write("*****************************************\n")
+        #    f.write("*****************************************\n")
+        #    f.write("Avg accuracy: \n")
+        #    f.write(str(mean_accuracy) + " + " + str(std_accuracy) + "\n")
+        #    f.write("Avg class-bin accuracy: \n")
+        #    class_labels = ["N=1 ", "N=2 ", "N=3 ", "N=4b", "N=8", "N=4q", "N=6"]
+        #    for st in zip(class_labels, mean_class_accuracy, std_class_accuracy):
+        #        f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        #    mass_labels = ["[{}, {}]".format(300+i*50, 300+(i+1)*50) for i in range(8)]
+        #    f.write("Avg mass-bin accuracy: \n")
+        #    for st in zip(mass_labels, mean_massbin_accuracy, std_massbin_accuracy):
+        #        f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        #    pT_labels = ["[{}, {}]".format(1000+i*20, 1000+(i+1)*20) for i in range(11)]
+        #    f.write("Avg pT-bin accuracy: \n")
+        #    for st in zip(pT_labels, mean_pTbin_accuracy, std_pTbin_accuracy):
+        #        f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        #    f.write("*****************************************\n")
 
     print("Done :)")
