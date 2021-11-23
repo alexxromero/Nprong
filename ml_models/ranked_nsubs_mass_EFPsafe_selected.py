@@ -7,9 +7,10 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import get_nsub_dataset, split_dataset
+from utils import get_nsub_EFP_mass_multi_dataset, split_dataset
 from utils import plot_loss_acc
 from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
+from utils import Dataset
 
 import torch
 import torch.nn as nn
@@ -35,7 +36,6 @@ def load_generator(data_train, data_val, data_test, batch_size=256):
 class HLNetBatchNorm(nn.Module):
     def __init__(self, input_dim, inter_dim, num_hidden, out_dim, do_rate):
         super(HLNetBatchNorm, self).__init__()
-
         self.out_dim = out_dim
         modules = []
         for i in range(num_hidden):
@@ -74,78 +74,34 @@ class HLNet(nn.Module):
         return out
 
 
-def train(model, train_generator, optimizer, loss_fn, epoch, val_generator=None):
-    model.train()
-    train_loss, train_acc = 0.0, 0.0
-    iterations = len(train_generator)
-    for i, (nsubs, y, mass, pT) in enumerate(train_generator):
-        optimizer.zero_grad()
-
-        nsubs = torch.tensor(nsubs).float().to(device)
-        y = torch.tensor(y).long().to(device)
-
-        ypred = model(nsubs)
-        loss = loss_fn(ypred, y)
-        loss = loss.mean()
-        loss.backward()
-        optimizer.step()
-        acc = (torch.argmax(ypred, dim=1) == y).sum().item() / y.shape[0]
-
-        train_loss += loss.item()
-        train_acc += acc
-
-        if i % 50 == 0:
-            print('Train loss: ', loss.item(), '  Train acc: ', acc)
-            writer.add_scalar('Loss/train', loss.item(), epoch * iterations + i)
-            writer.add_scalar('Acc/train', acc, epoch * iterations + i)
-
-    train_loss /= len(train_generator)  # avg over all batches in the epoch
-    train_acc  /= len(train_generator)  # avg over all batches in the epoch
-
-    if val_generator is not None:
-        val_loss, val_acc, _ = test(model, val_generator,
-                                    loss_fn=loss_fn, epoch=epoch,
-                                    validate=True)
-        print('Val loss: ', val_loss, ' Val acc: ', val_acc)
-        return train_loss, train_acc, val_loss, val_acc, model
-    return train_loss, train_acc, model
-
-
-def test(model, generator, loss_fn, epoch=None, validate=False):
+def test(model, generator, loss_fn, device, epoch=None, validate=False):
     model.eval()
     predy_truey_mass_pT = []
     test_loss, test_acc = 0.0, 0.0
     nsamples = 0
-
     with torch.no_grad():
         for i, (nsubs, y, mass, pT) in enumerate(generator):
             nsubs = torch.tensor(nsubs).float().to(device)
             y = torch.tensor(y).long().to(device)
-
             ypred = model(nsubs)
             loss = loss_fn(ypred, y)
-
             pred_y = torch.argmax(ypred, dim=1)
             predy_truey_mass_pT.append(torch.stack(
                 [pred_y.float().cpu(), y.float().cpu(), mass.float(), pT.float()])
                 )
-
             test_loss += loss.sum().item()
             test_acc  += (torch.argmax(ypred, dim=1) == y).sum().item()
             nsamples += y.shape[0]
-
     predy_truey_mass_pT = torch.cat(predy_truey_mass_pT, dim=1).numpy()
     test_loss /= nsamples  # avg over all samples
     test_acc  /= nsamples  # avg over all samples
-
     if validate:
         writer.add_scalar('Loss/val', test_loss, epoch)
         writer.add_scalar('Acc/val', test_acc, epoch)
-
     return test_loss, test_acc, predy_truey_mass_pT
 
 
-def main(model, save_dir, model_tag):
+def main(model, hl_save_dir, hl_model_tag, epochs):
     hl_param = []
     other_param = []
     for name, param in model.named_parameters():
@@ -153,7 +109,7 @@ def main(model, save_dir, model_tag):
             hl_param.append(param)
         else:
             other_param.append(param)
-
+    lr = 1e-4
     param_groups = [{'params': hl_param, 'lr': lr},
                     {'params': other_param, 'lr': lr}]
 
@@ -162,36 +118,18 @@ def main(model, save_dir, model_tag):
         optimizer, milestones=[200, 400, 600, 800], gamma=0.5, last_epoch=-1
         )
     loss_fn = nn.CrossEntropyLoss(reduction='none')
-
-    # -- begin training -- #
-    best_acc = 0
-    saved_best_model = os.path.join(save_dir,
-                                    "best_model_{}.pt".format(model_tag))
-    train_loss_ls, train_acc_ls, val_loss_ls, val_acc_ls = [], [], [], []
-    for i in range(epochs):
-        print('Starting epoch ', i)
-        train_loss, train_acc, val_loss, val_acc, model = train(
-            model, generator['train'], optimizer, loss_fn, epoch=i,
-            val_generator=generator['val']
-            )
-        if val_acc > best_acc:
-            best_acc = val_acc
-            torch.save(model.state_dict(), saved_best_model)
-            print("model saved")
-        if (i+1) % 100 == 0:
-            torch.save(model.state_dict(), "./dummy_{}.pt".format(i))
-            print("model saved at epoch ", i)
-        train_loss_ls.append(train_loss)
-        train_acc_ls.append(train_acc)
-        val_loss_ls.append(val_loss)
-        val_acc_ls.append(val_acc)
-    writer.close()
+    #hl_save_dir = "nsubs_mass_fullrun"
+    #hl_model_tag = "nsubs_mass"
+    saved_best_model = os.path.join(hl_save_dir,
+                                    "best_model_{}.pt".format(hl_model_tag))
 
     print('Loading best model...')
     cp = torch.load(saved_best_model)
     model.load_state_dict(cp, strict=True)
 
-    _, test_acc, predy_truey_mass_pT = test(model, generator['test'], loss_fn)
+    _, test_acc, predy_truey_mass_pT = test(
+        model, generator['test'], loss_fn, device
+        )
     print("Total Acc: ", test_acc)
 
     predy = predy_truey_mass_pT[0, :]
@@ -208,18 +146,14 @@ def main(model, save_dir, model_tag):
     pT_acc = get_acc_per_pTbin(predy, truey, pT)
     print("pT-bin Acc: ", pT_acc)
 
-    plot_loss_acc(train_loss_ls, train_acc_ls, val_loss_ls, val_acc_ls,
-                  save_dir, model_tag)
-
     return test_acc, class_acc, mass_acc, pT_acc
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser(description='Nprong Model')
-    parser.add_argument("--input_file", type=str)
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--tag", type=str)
+    parser.add_argument("--sort_feat", type=int)
     args = parser.parse_args()
 
     # -- output dit -- #
@@ -229,25 +163,21 @@ if __name__ == '__main__':
 
     # -- some tunable variables -- #
     device = 'cuda'
-    lr = 1e-4  # or 1e-4
-    epochs = 500
+    epochs = 1000
     batch_size = 256
-    #fold_id = None  # doing 10 bootstraps now
 
     fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
-    with open(fname, "w") as f:
-        f.write("10-fold acc of the FNN trained on 135 N-sub variables.\n")
+    with open(fname, "a") as f:
+        f.write("10-fold acc of the FNN trained on 135 N-sub variables, plus jet mass and multiplicity.\n")
         f.write("batch size: {}\n".format(batch_size))
-        f.write("learning rate: {}\n".format(lr))
+        f.write("learning rate: {}\n".format("1e-4"))
         f.write("epochs: {}\n".format(epochs))
         f.write("Net layers: [135-800-800-800-800-800-64-7]\n")
         f.write("Dropout: 0.3\n")
         f.write("Hidden act: ReLU\n")
         f.write("Optimizer: Adam\n")
         f.write("Loss: CrossEntropyLoss\n")
-
         f.write("*****************************************\n")
-
 
         accuracy = []  # avg over all folds
         class_accuracy = []  # class avg over all folds
@@ -258,19 +188,37 @@ if __name__ == '__main__':
             print("* Nsubs Fold #: {}                         *".format(fold_id))
             print("*******************************************")
             # -- read and split the data -- #
-            y, nsubs, mass, pT = get_nsub_dataset(args.input_file)
+            y, X, mass, pT = get_nsub_EFP_mass_multi_dataset()
+            # using features selected with lasso strength=5
+            lasso_ix = [ 45,  91, 178, 137,  48, 297,  50, 257,   4,  46,
+                          1,  54,  96,  94,  12, 254,  20, 248, 298,   2,
+                        266, 204, 261,  47, 140, 237,  92, 268, 155, 247,
+                        193]
+            X = X[:, lasso_ix]
             nsamples = y.shape[0]
             nclasses = len(np.unique(y))
             print("Total of {} samples with {} classes".format(nsamples, nclasses))
 
-            data_train, data_val, data_test = split_dataset(nsubs, y, mass, pT,
+            data_train, data_val, data_test = split_dataset(X, y, mass, pT,
                                                             fold_id=fold_id,
                                                             num_folds=10)
+            # # replace observable sort_feat with random instances of the
+            # # observable taken form the training set
+            rand_ix = np.arange(len(data_train))
+            np.random.shuffle(rand_ix)
+            rand_ix = rand_ix[:len(data_test)]
+            X_test_shuff = data_test.X[:len(data_test)]
+            X_test_shuff[:, args.sort_feat] = data_train.X[rand_ix, args.sort_feat]
+            data_test_shuff = Dataset(X_test_shuff,
+                                      data_test.y[:len(data_test)],
+                                      data_test.mass[:len(data_test)],
+                                      data_test.pT[:len(data_test)])
+
             generator = load_generator(data_train, data_val,
-                                       data_test, batch_size=batch_size)
+                                       data_test_shuff, batch_size=batch_size)
 
             # -- setup the model -- #
-            hlnet_base = make_hlnet_base(input_dim=nsubs.shape[1],
+            hlnet_base = make_hlnet_base(input_dim=X.shape[1],
                                          inter_dim=800,
                                          num_hidden=5,
                                          out_dim=64,
@@ -285,8 +233,10 @@ if __name__ == '__main__':
             print("Total no. of params: ", count_parameters(model))
 
             model_tag = "{}_{}".format(args.tag, fold_id)
-            acc, class_acc, mass_acc, pT_acc = main(model, args.save_dir,
-                                                    model_tag)
+            hl_save_dir = "/home/alex/Desktop/Nprong/ml_models/nsubs_mass_EFP_selected_fullrun"
+            hl_model_tag = "selected_lasso_strength5_{}".format(fold_id)
+            acc, class_acc, mass_acc, pT_acc = main(model, hl_save_dir,
+                                                    hl_model_tag, epochs)
             accuracy.append(acc)
             class_accuracy.append(class_acc)
             mass_accuracy.append(mass_acc)
@@ -303,19 +253,56 @@ if __name__ == '__main__':
             f.write(str(pT_acc)+"\n")
 
         mean_accuracy = np.mean(accuracy)
+        std_accuracy =  np.std(accuracy, ddof=1)
         mean_class_accuracy = np.mean(class_accuracy, axis=0)
+        std_class_accuracy = np.std(class_accuracy, ddof=1, axis=0)
         mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
+        std_massbin_accuracy = np.std(mass_accuracy, ddof=1, axis=0)
         mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
+        std_pTbin_accuracy = np.std(pT_accuracy, ddof=1, axis=0)
 
         f.write("*****************************************\n")
         f.write("Avg accuracy: \n")
-        f.write(str(mean_accuracy)+"\n")
+        f.write(str(mean_accuracy) + " + " + str(std_accuracy) + "\n")
         f.write("Avg class-bin accuracy: \n")
-        f.write(str(mean_class_accuracy)+"\n")
+        class_labels = ["N=1", "N=2", "N=3", "N=4b", "N=6", "N=8", "N=4q"]
+        for st in zip(class_labels, mean_class_accuracy, std_class_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        mass_labels = ["[{}, {}]".format(300+i*50, 300+(i+1)*50) for i in range(8)]
         f.write("Avg mass-bin accuracy: \n")
-        f.write(str(mean_massbin_accuracy)+"\n")
+        for st in zip(mass_labels, mean_massbin_accuracy, std_massbin_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
+        pT_labels = ["[{}, {}]".format(1000+i*25, 1000+(i+1)*25) for i in range(8)]
         f.write("Avg pT-bin accuracy: \n")
-        f.write(str(mean_pTbin_accuracy)+"\n")
+        for st in zip(pT_labels, mean_pTbin_accuracy, std_pTbin_accuracy):
+            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
         f.write("*****************************************\n")
+
+    # and also save to an h5 file
+    fname_h5 = os.path.join(args.save_dir, "summary_{}.h5".format(args.tag))
+    f_h5 = h5py.File(fname_h5, 'w')
+    f_h5.create_dataset("mean_acc", data=mean_accuracy)
+    f_h5.create_dataset("std_acc", data=std_accuracy)
+    f_h5.create_group("per_prong")
+    for i, nclass in enumerate(class_labels):
+        f_h5.create_dataset("per_prong/{}_acc".format(nclass),
+                             data=mean_class_accuracy[i])
+        f_h5.create_dataset("per_prong/{}_std".format(nclass),
+                             data=std_class_accuracy[i])
+    f_h5.create_group("per_mass")
+    mass_labels_low = ["{}GeV".format(300+i*50) for i in range(8)]
+    for i, massbin in enumerate(mass_labels_low):
+        f_h5.create_dataset("per_mass/{}_acc".format(massbin),
+                             data=mean_massbin_accuracy[i])
+        f_h5.create_dataset("per_mass/{}_std".format(massbin),
+                             data=std_massbin_accuracy[i])
+    f_h5.create_group("per_pT")
+    pT_labels_low = ["{}GeV".format(1000+i*25) for i in range(8)]
+    for i, pTbin in enumerate(pT_labels_low):
+        f_h5.create_dataset("per_pT/{}_acc".format(pTbin),
+                             data=mean_pTbin_accuracy[i])
+        f_h5.create_dataset("per_pT/{}_std".format(pTbin),
+                             data=std_pTbin_accuracy[i])
+    f_h5.close()
 
     print("Done :)")

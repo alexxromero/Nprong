@@ -1,7 +1,7 @@
-# Based on Yadong's networks. Similar code, I just cleaned up the
-# part of the analysis that are no longer needed.
-
+# Based on Yadong's transformer code.
+# The BERT model uses the same parameters that Y got in his optimization.
 import os
+from pathlib import Path
 import numpy as np
 import h5py
 from torch.utils.data import Dataset
@@ -10,74 +10,85 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MaxAbsScaler
 import energyflow as ef
 
-
-
-def get_nsub_EFP_mass_multi_dataset(input_file):
-    efpset = ef.EFPSet(('d<=5'), measure='hadr')
-    ix = efpset.sel(('p==', 1))
-
-    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
-    with h5py.File(mass_pT_file, 'r') as f:
-        mass = np.array(f['jet_Mass'])
-        pT = np.array(f['jet_PT'])
-    EFP_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_EFPs.h5"
+def get_EFPs_multi(dmax):
+    efpset = ef.EFPSet(('d<=', dmax), measure='hadr')
+    ix = efpset.sel(('p==', 1))  # only prime EFPs
+    EFP_file = os.path.join(Path.home(), "Ntag", "datasets", "dataset_EFPs.h5")
     with h5py.File(EFP_file, 'r') as f:
         EFPs = np.concatenate((#f['kappa00_beta05'],
                                f['kappa10_beta05'][()][:, ix],
                                f['kappa10_beta10'][()][:, ix],
                                f['kappa10_beta20'][()][:, ix]), axis=-1)
-        multi = f['kappa00_beta10'][()][:, 0]
-    with h5py.File(input_file, 'r') as f:
-        y = np.array(f['target'])
-        mass_normed = mass / 700.0
-        multi_normed = multi / 230
-        nsubs_EFP_mass = np.concatenate((f['Nsubs']['Nsubs_beta05'],
-                                         f['Nsubs']['Nsubs_beta10'],
-                                         f['Nsubs']['Nsubs_beta20'],
-                                         EFPs,
-                                         mass_normed.reshape(-1, 1),
-                                         multi_normed.reshape(-1, 1)), axis=-1)
-    return y, nsubs_EFP_mass, mass, pT
+        multi = f['kappa00_beta10'][()][:, 0]  # tower multiplicity
+    return EFPs, multi
 
 
-def get_nsub_mass_dataset(input_file):
-    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
+def get_mass_pT():
+    mass_pT_file = os.path.join(
+        Path.home(), "Ntag", "datasets", "dataset_noPtNorm.h5")
     with h5py.File(mass_pT_file, 'r') as f:
         mass = np.array(f['jet_Mass'])
         pT = np.array(f['jet_PT'])
-    with h5py.File(input_file, 'r') as f:
-        y = np.array(f['target'])
-        mass_normed = mass / 700.0
-        nsubs_mass = np.concatenate((f['Nsubs']['Nsubs_beta05'],
-                                     f['Nsubs']['Nsubs_beta10'],
-                                     f['Nsubs']['Nsubs_beta20'],
-                                     mass_normed.reshape(-1, 1)), axis=-1)
-    return y, nsubs_mass, mass, pT
+    return mass, pT
 
 
-def get_nsub_dataset(input_file):
-    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
-    with h5py.File(mass_pT_file, 'r') as f:
-        mass = np.array(f['jet_Mass'])
-        pT = np.array(f['jet_PT'])
-    with h5py.File(input_file, 'r') as f:
-        y = np.array(f['target'])
-        nsubs = np.concatenate((f['Nsubs']['Nsubs_beta05'],
-                                f['Nsubs']['Nsubs_beta10'],
-                                f['Nsubs']['Nsubs_beta20']), axis=-1)
-        #mass = np.array(f['jet_Mass'])
-        #pT = np.array(f['jet_PT'])
-    return y, nsubs, mass, pT
+def get_nsubs(nsubs_k):
+    normed_file = os.path.join(
+        Path.home(), "Ntag", "datasets", "dataset_PtNormed.h5")
+    f = h5py.File(normed_file, 'r')
+    if nsubs_k < 45:
+        nsubs = np.concatenate(
+            (f['Nsubs']['Nsubs_beta05'][:, :nsubs_k],
+             f['Nsubs']['Nsubs_beta10'][:, :nsubs_k],
+             f['Nsubs']['Nsubs_beta20'][:, :nsubs_k]), axis=-1)
+    else:
+        nsubs = np.concatenate(
+            (f['Nsubs']['Nsubs_beta05'],
+             f['Nsubs']['Nsubs_beta10'],
+             f['Nsubs']['Nsubs_beta20']), axis=-1)
+    return nsubs
 
-def get_threeM_dataset(input_file):
-    mass_pT_file = "/home/alex/Desktop/Nprong_AR/datasets/dataset_noPtNorm.h5"
-    with h5py.File(mass_pT_file, 'r') as f:
-        mass = np.array(f['jet_Mass'])
-        pT = np.array(f['jet_PT'])
-    with h5py.File(input_file, 'r') as f:
-        y = np.array(f['target'])
+
+def get_labels():
+    mass_pT_file = os.path.join(
+        Path.home(), "Ntag", "datasets", "dataset_noPtNorm.h5")
+    f = h5py.File(mass_pT_file, 'r')
+    y = np.array(f['target'])
+    f.close()
+    return y
+
+
+def get_nsub_EFP_mass_multi_dataset(nsubs_k=45, dmax=5):
+    y = get_labels()
+    mass, pT = get_mass_pT()
+    EFPs, multi = get_EFPs_multi(dmax=dmax)
+    nsubs = get_nsubs(nsubs_k=nsubs_k)
+    mass_normed = mass / 700.0  # max jet mass value
+    multi_normed = multi / 230  # max no. of towers
+    data = np.concatenate((nsubs, EFPs,
+                           mass_normed.reshape(-1, 1),
+                           multi_normed.reshape(-1, 1)), axis=-1)
+    return y, data, mass, pT
+
+
+def get_nsub_mass_dataset(nsubs_k=45):
+    y = get_labels()
+    mass, pT = get_mass_pT()
+    nsubs = get_nsubs(nsubs_k=nsubs_k)
+    mass_normed = mass / 700.0  # max jet mass value
+    data = np.concatenate((nsubs, mass_normed.reshape(-1, 1)), axis=-1)
+    return y, data, mass, pT
+
+
+def get_threeM_dataset():
+    y = get_labels()
+    mass, pT = get_mass_pT()
+    normed_file = os.path.join(
+        Path.home(), "Ntag", "datasets", "dataset_PtNormed.h5")
+    with h5py.File(normed_file, 'r') as f:
         threeM = np.array(f['Constituents']['threeM'])
     return y, threeM, mass, pT
+
 
 def get_acc_per_class(ypred, y):
     class_accs = []
@@ -88,6 +99,7 @@ def get_acc_per_class(ypred, y):
         acc = np.where(ypred_bin == y_bin)[0].shape[0]
         class_accs.append(acc / inbin.shape[0])
     return class_accs
+
 
 def get_acc_per_massbin(ypred, y, mass):
     bins = [300+i*50 for i in range(9)]
@@ -101,8 +113,9 @@ def get_acc_per_massbin(ypred, y, mass):
         massbin_accs.append(acc / inbin.shape[0])
     return massbin_accs
 
+
 def get_acc_per_pTbin(ypred, y, pT):
-    bins = [1000+i*20 for i in range(11)]
+    bins = [1000+i*25 for i in range(9)]
     pT_ix = np.digitize(pT, bins)
     pTbin_accs = []
     for i in range(1, len(bins)):
@@ -125,7 +138,6 @@ class Dataset(Dataset):
     def __getitem__(self, index):
         return self.X[index], self.y[index], self.mass[index], self.pT[index]
 
-
 def split_dataset(X, y, mass, pT, fold_id=None, num_folds=10, scale=False):
     total_num_sample = X.shape[0]
     if fold_id is not None:
@@ -135,11 +147,9 @@ def split_dataset(X, y, mass, pT, fold_id=None, num_folds=10, scale=False):
             l[i] = cross_validate_perm(l[i], fold_id=fold_id,
                                        num_folds=num_folds)
         X, y, mass, pT = l
-
     # for 10-folds, the split train:test:val is 80:10:10
     train_cut = int(total_num_sample * 0.8)
     val_cut = int(total_num_sample * 0.9)
-
     X_train, X_val, X_test = \
         X[:train_cut], X[train_cut:val_cut], X[val_cut:]
     y_train, y_val, y_test = \
@@ -155,11 +165,9 @@ def split_dataset(X, y, mass, pT, fold_id=None, num_folds=10, scale=False):
         nsubs_train = scaler.fit_transform(X_train)
         nsubs_val = scaler.transform(X_val)
         nsubs_test = scaler.transform(X_test)
-
     data_train = Dataset(X_train, y_train, mass_train, pT_train)
     data_val = Dataset(X_val, y_val, mass_val, pT_val)
     data_test = Dataset(X_test, y_test, mass_test, pT_test)
-
     return data_train, data_val, data_test
 
 
@@ -169,14 +177,13 @@ def plot_loss_acc(train_loss, train_acc, val_loss, val_acc,
     ix = np.argmax(val_acc)
     ax[0].plot(train_acc, label='Train')
     ax[0].plot(val_acc, label='Val')
-    ax[0].vlines(ix, 
-                 np.min([np.min(train_acc), np.min(val_acc)]), 
+    ax[0].vlines(ix,
+                 np.min([np.min(train_acc), np.min(val_acc)]),
                  np.max([np.max(train_acc), np.max(val_acc)]),
                  colors='black', linestyles='dotted')
     ax[0].set_xlabel('epoch', fontsize=14)
     ax[0].set_ylabel('Accuracy', fontsize=14)
     ax[0].legend(fontsize=14)
-
     ax[1].plot(train_loss, label='Train')
     ax[1].plot(val_loss, label='Val')
     ax[1].vlines(ix,
@@ -186,7 +193,6 @@ def plot_loss_acc(train_loss, train_acc, val_loss, val_acc,
     ax[1].set_xlabel('epoch', fontsize=14)
     ax[1].set_ylabel('Loss', fontsize=14)
     ax[1].legend(fontsize=14)
-
     plt.savefig(os.path.join(save_dir, "acc_loss_{}.png".format(model_tag)),
                 bbox_inches='tight')
 

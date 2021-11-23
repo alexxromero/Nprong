@@ -4,9 +4,9 @@ import argparse
 import time
 import h5py
 import numpy as np
-from utils import plot_loss_acc
-from utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
-from utils import get_threeM_dataset, split_dataset
+from data_utils import plot_loss_acc
+from data_utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
+from data_utils import get_threeM_dataset, split_dataset
 
 import energyflow as ef
 from energyflow.archs import PFN
@@ -15,17 +15,14 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import backend as K
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = torch.cuda.get_device_name(0)
-# print('training using GPU:', torch.cuda.get_device_name(0))
-
-def setup_PFN(input_dim, lr):
+def setup_PFN(input_dim, lr, nclasses):
     opt = tf.keras.optimizers.Adam(lr=lr)
     model = PFN(input_dim=input_dim,
                 output_dim=nclasses,
                 Phi_sizes=(128, 128),
-                Phi_acts = 'relu',
+                Phi_acts='relu',
                 F_sizes=(1024, 1024),
-                F_acts = 'relu',
+                F_acts='relu',
                 F_dropouts=0.2,
                 compile_opts={'optimizer': opt,
                               'loss': 'categorical_crossentropy',
@@ -33,19 +30,19 @@ def setup_PFN(input_dim, lr):
     return model
 
 
-def train_model(model, save_dir, model_tag, data_train, data_val):
-    saved_best_model = os.path.join(save_dir,
-                                    "best_model_{}.h5".format(model_tag))
-    callbacks = [tf.keras.callbacks.ModelCheckpoint(
-        saved_best_model, monitor='val_acc', save_best_only=True)]
-
+def train_pfn(model, total_epochs, save_dir, model_tag, batch_size,
+              data_train, data_val=None):
+    best_model_path = os.path.join(save_dir, "pfn_{}_best.pt".format(model_tag))
     n_train = len(data_train)
-    n_val = len(data_val)
+    if data_val is not None:
+        n_val = len(data_val)
+        validation_data = (data_val[:n_val][0], data_val[:n_val][1])
+    callbacks = [tf.keras.callbacks.ModelCheckpoint(
+        best_model_path, monitor='val_acc', save_best_only=True)]
     history = model.fit(data_train[:n_train][0], data_train[:n_train][1],
-                        epochs=epochs,
+                        epochs=total_epochs,
                         batch_size=batch_size,
-                        validation_data=(data_val[:n_val][0],
-                                         data_val[:n_val][1]),
+                        validation_data=validation_data,
                         verbose=2,
                         callbacks=callbacks)
     plot_loss_acc(history.history['loss'],
@@ -55,141 +52,113 @@ def train_model(model, save_dir, model_tag, data_train, data_val):
                   save_dir, model_tag)
 
 
-def eval_model(save_dir, model_tag, data_test):
-    saved_best_model = os.path.join(save_dir,
-                                    "best_model_{}.h5".format(model_tag))
-    model = tf.keras.models.load_model(saved_best_model)
+def eval_pfn(model, save_dir, model_tag, summary_file, batch_size, data_test):
+    best_model_path = os.path.join(save_dir, "pfn_{}_best.pt".format(model_tag))
+    best_model = tf.keras.models.load_model(best_model_path)
     n_test = len(data_test)
-    ypred = model.predict(data_test[:n_test][0])
-    ypred = np.argmax(ypred, axis=1)
+    ypred_vect = best_model.predict(data_test[:n_test][0])
+    ypred = np.argmax(ypred_vect, axis=1)
     ytrue = np.argmax(data_test[:n_test][1], axis=1)
-
-    acc = (ypred == ytrue).sum().item() / ytrue.shape[0]
-    print("Acc: ", acc)
-
+    test_acc = (ypred == ytrue).sum().item() / ytrue.shape[0]
     class_acc = get_acc_per_class(ypred, ytrue)
-    print("Class Acc: ", class_acc)
-
-    mass_acc = get_acc_per_massbin(ypred, ytrue,
-                                   data_test[:n_test][2])
-    print("Mass-bin Acc: ", mass_acc)
-
-    pT_acc = get_acc_per_pTbin(ypred, ytrue,
-                               data_test[:n_test][3])
-    print("pT-bin Acc: ", pT_acc)
-
-    return acc, class_acc, mass_acc, pT_acc
-
+    mass_acc = get_acc_per_massbin(ypred, ytrue, data_test[:n_test][2])
+    pT_acc = get_acc_per_pTbin(ypred, ytrue, data_test[:n_test][3])
+    f = open(summary_file, "a")
+    f.write("Accuracy : \n")
+    f.write(str(test_acc)+"\n")
+    f.write("Class-bin accuracy : \n")
+    class_labels = ["N=1", "N=2", "N=3", "N=4b", "N=6", "N=8", "N=4q"]
+    for st in zip(class_labels, class_acc):
+        f.write(st[0] + " : " + str(st[1]) + "\n")
+    f.write("Mass-bin accuracy : \n")
+    f.write(str(mass_acc)+"\n")
+    f.write("pT-bin accuracy : \n")
+    f.write(str(pT_acc)+"\n")
+    f.close()
+    # -- and save the predictions to an h5 file -- #
+    fh5_path = os.path.join(
+        save_dir, "pfn_eval_{}.h5".format(model_tag))
+    fh5 = h5py.File(fh5_path, 'w')
+    fh5.create_dataset("overall_acc", data=test_acc)
+    fh5.create_dataset("class_accs", data=class_acc)
+    fh5.create_dataset("mass_accs", data=mass_acc)
+    fh5.create_dataset("pT_accs", data=pT_acc)
+    fh5.create_dataset("pred_y", data=ypred)
+    fh5.create_dataset("pred_y_vect", data=ypred_vect)
+    fh5.create_dataset("true_y", data=ytrue)
+    fh5.create_dataset("pT", data=data_test[:n_test][3])
+    fh5.create_dataset("mass", data=data_test[:n_test][2])
+    fh5.close()
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser(description='Nprong Model -- PFN')
-    parser.add_argument("--input_file", type=str)
+    parser.add_argument("--state", type=str, choices=['train', 'test'])
+    parser.add_argument("--fold", type=int)
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--tag", type=str)
     args = parser.parse_args()
 
-    # -- output dit -- #
+    # -- output dir -- #
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
     # -- some tunable variables -- #
     device = 'cuda'
-    lr = 1e-4  # or 1e-3
-    epochs = 1000
+    lr = 1e-4
+    total_epochs = 1000
     batch_size = 256
-    #fold_id = None  # doing 10 bootstraps now
 
-    fname = os.path.join(args.save_dir, "summary_{}.txt".format(args.tag))
-    with open(fname, "w") as f:
-        f.write("10-fold acc of the PFN.\n")
-        f.write("batch size: {}\n".format(batch_size))
-        f.write("learning rate: {}\n".format(lr))
-        f.write("epochs: {}\n".format(epochs))
-        f.write("Phi layers: [128 128]\n")
-        f.write("F layers: [1024 1024]\n")
-        f.write("F_dropouts: 0.5\n")
-        f.write("Optimizer: Adam\n")
-        f.write("Output act: Softmax")
-        f.write("Hiden act: ReLu")
-        f.write("Loss: CrossEntropyLoss\n")
+    # -- get the jet constituents -- #
+    y, threeM, mass, pT = get_threeM_dataset()
+    nsamples = y.shape[0]
+    nclasses = len(np.unique(y))
 
-        f.write("*****************************************\n")
+    fname = os.path.join(
+        args.save_dir, "summary_{}_f{}.txt".format(args.tag, args.fold))
+    f = open(fname, "w")
+    f.write("Fold acc of the PFN model.\n")
+    f.write("Fold: {}\n".format(args.fold))
+    f.write("batch size: {}\n".format(batch_size))
+    f.write("learning rate: {}\n".format(lr))
+    f.write("epochs: {}\n".format(total_epochs))
+    f.write("Phi layers: [128 128]\n")
+    f.write("F layers: [1024 1024]\n")
+    f.write("F_dropouts: 0.2\n")
+    f.write("Optimizer: Adam\n")
+    f.write("Output act: Softmax\n")
+    f.write("Hiden act: ReLu\n")
+    f.write("Loss: CrossEntropyLoss\n")
+    f.write("*****************************************\n")
 
-        accuracy = []  # avg over all folds
-        class_accuracy = []  # class avg over all folds
-        mass_accuracy = []  # mass-bin avg over all folds
-        pT_accuracy = []  # pT-bin avg over all folds
-        for fold_id in range(10):
-            print("*******************************************")
-            print("* PFN Fold #: {}                           *".format(fold_id))
-            print("*******************************************")
-            # -- read and split the data -- #
-            y, threeM, mass, pT = get_threeM_dataset(args.input_file)
-            nsamples = y.shape[0]
-            nclasses = len(np.unique(y))
-            y = tf.keras.utils.to_categorical(y, num_classes=nclasses)
-            print("Total of {} samples with {} classes".format(nsamples, nclasses))
+    print("*******************************************")
+    print("* Fold #: {}                               *".format(args.fold))
+    print("* Total of {} samples with {} classes  *".format(nsamples, nclasses))
+    print("*******************************************")
 
-            data_train, data_val, data_test = split_dataset(threeM, y, mass, pT,
-                                                            fold_id=fold_id,
-                                                            num_folds=10)
-            # -- setup the model -- #
-            model = setup_PFN(input_dim=3, lr=lr)
-            def count_parameters(model):
-                return np.sum([K.count_params(p) for p in set(model.trainable_weights)])
-            f.write("Num. of trainable params: {} \n".format(count_parameters(model)))
-            print("Total no. of params: ", count_parameters(model))
+    # -- split the data -- #
+    y = tf.keras.utils.to_categorical(y, num_classes=nclasses)
+    data_train, data_val, data_test = split_dataset(threeM, y, mass, pT,
+                                                    fold_id=args.fold,
+                                                    num_folds=10)
 
-            # -- train & eval model -- #
-            model_tag = "{}_{}".format(args.tag, fold_id)
-            train_model(model, args.save_dir, model_tag,
-                        data_train=data_train, data_val=data_val)
+    # -- setup the model and print the no. of params -- #
+    model = setup_PFN(input_dim=3, lr=lr, nclasses=nclasses)
+    def count_parameters(model):
+        return np.sum([K.count_params(p) for p in set(model.trainable_weights)])
+    f.write("Num. of trainable params: {} \n".format(count_parameters(model)))
+    f.close()
+    print("Total no. of params: ", count_parameters(model))
 
-            acc, class_acc, mass_acc, pT_acc = eval_model(
-                args.save_dir, model_tag, data_test=data_test
-                )
-
-            accuracy.append(acc)
-            class_accuracy.append(class_acc)
-            mass_accuracy.append(mass_acc)
-            pT_accuracy.append(pT_acc)
-
-            f.write("Fold {}\n".format(fold_id))
-            f.write("Accuracy : \n")
-            f.write(str(acc)+"\n")
-            f.write("Class-bin accuracy : \n")
-            f.write(str(class_acc)+"\n")
-            f.write("Mass-bin accuracy : \n")
-            f.write(str(mass_acc)+"\n")
-            f.write("pT-bin accuracy : \n")
-            f.write(str(pT_acc)+"\n")
-
-        mean_accuracy = np.mean(accuracy)
-        std_accuracy =  np.std(accuracy, ddof=1)
-        mean_class_accuracy = np.mean(class_accuracy, axis=0)
-        std_class_accuracy = np.std(class_accuracy, ddof=1, axis=0)
-        mean_massbin_accuracy = np.mean(mass_accuracy, axis=0)
-        std_massbin_accuracy = np.std(mass_accuracy, ddof=1, axis=0)
-        mean_pTbin_accuracy = np.mean(pT_accuracy, axis=0)
-        std_pTbin_accuracy = np.std(pT_accuracy, ddof=1, axis=0)
-
-        f.write("*****************************************\n")
-        f.write("Avg accuracy: \n")
-        f.write(str(mean_accuracy) + " + " + str(std_accuracy) + "\n")
-        f.write("Avg class-bin accuracy: \n")
-        class_labels = ["N=1 ", "N=2 ", "N=3 ", "N=4b", "N=8", "N=4q", "N=6"]
-        for st in zip(class_labels, mean_class_accuracy, std_class_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        mass_labels = ["[{}, {}]".format(300+i*50, 300+(i+1)*50) for i in range(8)]
-        f.write("Avg mass-bin accuracy: \n")
-        for st in zip(mass_labels, mean_massbin_accuracy, std_massbin_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        pT_labels = ["[{}, {}]".format(1000+i*20, 1000+(i+1)*20) for i in range(11)]
-        f.write("Avg pT-bin accuracy: \n")
-        for st in zip(pT_labels, mean_pTbin_accuracy, std_pTbin_accuracy):
-            f.write(st[0] + " : " + str(st[1]) + " + " + str(st[2]) + "\n")
-        f.write("*****************************************\n")
+    # -- and execute the desired state -- #
+    model_tag = "{}_f{}".format(args.tag, args.fold)
+    if args.state == "train":
+        train_pfn(
+            model, total_epochs, args.save_dir, model_tag,
+            batch_size=batch_size, data_train=data_train, data_val=data_val)
+    elif args.state == "test":
+        eval_pfn(
+            model, args.save_dir, model_tag,
+            summary_file=fname, batch_size=batch_size, data_test=data_test)
 
     print("Done :)")

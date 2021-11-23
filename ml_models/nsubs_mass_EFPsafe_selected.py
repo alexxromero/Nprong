@@ -7,7 +7,12 @@ import argparse
 import time
 import h5py
 import numpy as np
-from data_utils import get_nsub_mass_dataset, split_dataset
+from data_utils import get_nsub_EFP_mass_multi_dataset, split_dataset
+from data_utils import plot_loss_acc
+from data_utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
+
+# using the same architecture as the nsubs
+from nsubs_mass import make_hlnet_base, HLNet
 
 import torch
 import torch.nn as nn
@@ -20,46 +25,6 @@ from torch_utils import load_generator, train_torch_model, eval_torch_model
 
 os.environ['CUDA_VISIBLE_DEVICES'] = torch.cuda.get_device_name(0)
 print('training using GPU:', torch.cuda.get_device_name(0))
-
-class HLNetBatchNorm(nn.Module):
-    def __init__(self, input_dim, inter_dim, num_hidden, out_dim, do_rate):
-        super(HLNetBatchNorm, self).__init__()
-        self.out_dim = out_dim
-        modules = []
-        for i in range(num_hidden):
-            if i == 0:
-                modules.append(nn.Linear(input_dim, inter_dim))
-            else:
-                modules.append(nn.Linear(inter_dim, inter_dim))
-            modules.append(nn.ReLU())
-            modules.append(nn.BatchNorm1d(inter_dim))
-            if do_rate > 0:
-                modules.append(nn.Dropout(p=do_rate))
-        modules.append(nn.ReLU())
-        self.hidden = nn.Sequential(*modules)
-        self.output = nn.Linear(inter_dim, out_dim)
-
-    def forward(self, nsubs):
-        nsubs = self.hidden(nsubs)
-        return F.relu(self.output(nsubs))
-
-
-def make_hlnet_base(input_dim, inter_dim, num_hidden, out_dim, do_rate):
-    return HLNetBatchNorm(input_dim=input_dim, inter_dim=inter_dim,
-                          num_hidden=num_hidden, out_dim=out_dim,
-                          do_rate=do_rate)
-
-
-class HLNet(nn.Module):
-    def __init__(self, hlnet_base, out_dim, num_labels=7):
-        super(HLNet, self).__init__()
-        self.hlnet_base = hlnet_base
-        self.top = nn.Linear(out_dim, num_labels)
-
-    def forward(self, nsubs):
-        nsubs = self.hlnet_base(nsubs)
-        out = self.top(nsubs)
-        return out
 
 
 if __name__ == '__main__':
@@ -82,7 +47,13 @@ if __name__ == '__main__':
     batch_size = 256
 
     # -- get the jet observables -- #
-    y, X, mass, pT = get_nsub_mass_dataset()
+    y, X, mass, pT = get_nsub_EFP_mass_multi_dataset()
+    lasso_ix = [ 45,  91, 178, 137,  48, 297,  50, 257,   4,  46,
+                  1,  54,  96,  94,  12, 254,  20, 248, 298,   2,
+                266, 204, 261,  47, 140, 237,  92, 268, 155, 247,
+                193]
+    X = X[:, lasso_ix]
+    print("No. features: ", X.shape[1])
     nsamples = y.shape[0]
     nclasses = len(np.unique(y))
 
