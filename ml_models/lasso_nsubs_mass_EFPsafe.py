@@ -219,7 +219,7 @@ if __name__ == '__main__':
 
     # -- some tunable variables -- #
     device = 'cuda'
-    total_epochs = 50
+    total_epochs = 1000
     lr = 1e-4
     batch_size = 256
     strength = 10

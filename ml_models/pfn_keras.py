@@ -3,6 +3,7 @@ import sys
 import argparse
 import time
 import h5py
+import pandas as pd
 import numpy as np
 from data_utils import plot_loss_acc
 from data_utils import get_acc_per_class, get_acc_per_massbin, get_acc_per_pTbin
@@ -31,24 +32,43 @@ def setup_PFN(input_dim, lr, nclasses):
 
 
 def train_pfn(model, total_epochs, save_dir, model_tag, batch_size,
-              data_train, data_val=None):
-    best_model_path = os.path.join(save_dir, "pfn_{}_best.pt".format(model_tag))
+              data_train, data_val=None, resume_from_epoch=None):
     n_train = len(data_train)
     if data_val is not None:
         n_val = len(data_val)
         validation_data = (data_val[:n_val][0], data_val[:n_val][1])
-    callbacks = [tf.keras.callbacks.ModelCheckpoint(
-        best_model_path, monitor='val_acc', save_best_only=True)]
-    history = model.fit(data_train[:n_train][0], data_train[:n_train][1],
-                        epochs=total_epochs,
-                        batch_size=batch_size,
-                        validation_data=validation_data,
-                        verbose=2,
-                        callbacks=callbacks)
-    plot_loss_acc(history.history['loss'],
-                  history.history['acc'],
-                  history.history['val_loss'],
-                  history.history['val_acc'],
+
+    best_model_path = os.path.join(save_dir, "pfn_{}_best.pt".format(model_tag))
+    ckpt_best = tf.keras.callbacks.ModelCheckpoint(best_model_path, monitor='val_acc', save_best_only=True)
+    epoch_model_path = os.path.join(save_dir, "pfn_{}".format(model_tag) + "_e{epoch:04d}.pt")
+    ckpt_freq = tf.keras.callbacks.ModelCheckpoint(epoch_model_path, save_freq='epoch')
+    hist_fpath = os.path.join(save_dir, "pfn_{}_histlog.csv".format(model_tag))
+    append_log = True if resume_from_epoch is not None else False
+    csv_logger = tf.keras.callbacks.CSVLogger(hist_fpath, separator=",", append=append_log)
+    callbacks = [ckpt_best, ckpt_freq, csv_logger]
+    if resume_from_epoch is not None:
+        last_ckpt = os.path.join(save_dir, "pfn_{}".format(model_tag) + "_e{:04d}.pt".format(resume_from_epoch))
+        model = tf.keras.models.load_model(last_ckpt)
+        model.fit(data_train[:n_train][0], data_train[:n_train][1],
+                  epochs=total_epochs,
+                   batch_size=batch_size,
+                   validation_data=validation_data,
+                   verbose=2,
+                   initial_epoch=resume_from_epoch,
+                   callbacks=callbacks)
+    else:
+        model.fit(data_train[:n_train][0], data_train[:n_train][1],
+                  epochs=total_epochs,
+                  batch_size=batch_size,
+                  validation_data=validation_data,
+                  verbose=2,
+                  callbacks=callbacks)
+
+    hist_df = pd.read_csv(hist_fpath)
+    plot_loss_acc(hist_df['loss'],
+                  hist_df['acc'],
+                  hist_df['val_loss'],
+                  hist_df['val_acc'],
                   save_dir, model_tag)
 
 
@@ -97,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument("--fold", type=int)
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--tag", type=str)
+    parser.add_argument("--resume_from_epoch", type=int, default=None)
     args = parser.parse_args()
 
     # -- output dir -- #
@@ -155,7 +176,8 @@ if __name__ == '__main__':
     if args.state == "train":
         train_pfn(
             model, total_epochs, args.save_dir, model_tag,
-            batch_size=batch_size, data_train=data_train, data_val=data_val)
+            batch_size=batch_size, data_train=data_train, data_val=data_val,
+            resume_from_epoch=args.resume_from_epoch)
     elif args.state == "test":
         eval_pfn(
             model, args.save_dir, model_tag,

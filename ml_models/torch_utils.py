@@ -90,11 +90,11 @@ def test(device, model, generator, loss_fn, epoch=None, validate=False,
 
 def train_torch_model(device, model, generator, optimizer, loss_fn,
                       save_dir, model_tag,
-                      total_epochs, resume_from_epoch):
+                      total_epochs, resume_from_epoch=None):
     writer = SummaryWriter(save_dir)
     best_model_path = os.path.join(
         save_dir, "bert_{}_best.pt".format(model_tag))
-    if resume_from_epoch:  # load model's status and resume training
+    if resume_from_epoch is not None:  # load model's status and resume training
         checkpoint_path = os.path.join(save_dir,
             "bert_{}_e{}.pt".format(model_tag, resume_from_epoch))
         checkpoint = torch.load(checkpoint_path)

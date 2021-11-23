@@ -33,7 +33,7 @@ if __name__ == '__main__':
     parser.add_argument("--fold", type=int)
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--tag", type=str)
-    parser.add_argument("--resume_from_epoch", type=str, default=None)
+    parser.add_argument("--resume_from_epoch", type=int, default=None)
     args = parser.parse_args()
 
     # -- output dir -- #
